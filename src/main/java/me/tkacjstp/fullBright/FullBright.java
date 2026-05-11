@@ -13,6 +13,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scoreboard.*;
+import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.HashSet;
 import java.util.UUID;
@@ -26,17 +27,14 @@ public final class FullBright extends JavaPlugin implements  Listener {
         getServer().getPluginManager().registerEvents(this, this);
         getCommand("light").setExecutor(this);
 
-        /*new BukkitRunnable() {
+        new BukkitRunnable() {
             @Override
             public void run() {
-                for (Player player : Bukkit.getServer().getOnlinePlayers()) {
-                    if (fullBrightEnabled.contains(player.getUniqueId())) {
-
-                        PotionEffect nightVision = new PotionEffect(PotionEffectType.NIGHT_VISION, 1200, 0, false, false, false);
-                    }
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    updateScoreboard(player);
                 }
             }
-        }.runTaskTimer(this, 0L, 2L);*/
+        }.runTaskTimer(this, 0L, 2L); // 2틱(0.1초)마다 실행
     }
 
     @Override
