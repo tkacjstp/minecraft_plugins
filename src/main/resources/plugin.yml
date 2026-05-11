@@ -1,0 +1,6 @@
+name: MyFirstPlugin
+version: '1.0'
+main: me.tkacjstp.fullBright.FullBright  # 이 부분이 실제 내 코드 패키지+클래스명과 똑같아야 함!
+api-version: '26.1.2'
+commands:
+  light:
