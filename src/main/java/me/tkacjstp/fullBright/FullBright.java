@@ -2,9 +2,7 @@ package me.tkacjstp.fullBright;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.block.Biome;
 import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -14,7 +12,6 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
-import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scoreboard.*;
 
 import java.util.HashSet;
@@ -29,18 +26,17 @@ public final class FullBright extends JavaPlugin implements  Listener {
         getServer().getPluginManager().registerEvents(this, this);
         getCommand("light").setExecutor(this);
 
-        new BukkitRunnable() {
+        /*new BukkitRunnable() {
             @Override
             public void run() {
-                for (Player player : getServer().getOnlinePlayers()) {
-                    updateScoreboard(player);
-
+                for (Player player : Bukkit.getServer().getOnlinePlayers()) {
                     if (fullBrightEnabled.contains(player.getUniqueId())) {
-                        player.addPotionEffect(new PotionEffect(PotionEffectType.NIGHT_VISION, 300, 1, false, false, false));
+
+                        PotionEffect nightVision = new PotionEffect(PotionEffectType.NIGHT_VISION, 1200, 0, false, false, false);
                     }
                 }
             }
-        }.runTaskTimer(this, 0L, 2L);
+        }.runTaskTimer(this, 0L, 2L);*/
     }
 
     @Override
@@ -54,6 +50,13 @@ public final class FullBright extends JavaPlugin implements  Listener {
                 player.removePotionEffect(PotionEffectType.NIGHT_VISION);
             } else {
                 fullBrightEnabled.add(uuid);
+                player.addPotionEffect(new PotionEffect(
+                        PotionEffectType.NIGHT_VISION,
+                        Integer.MAX_VALUE,
+                        255,
+                        false,
+                        false,
+                        false));
             }
 
             return true;
@@ -64,7 +67,11 @@ public final class FullBright extends JavaPlugin implements  Listener {
 
     @EventHandler
     public  void onJoin(PlayerJoinEvent event) {
-        updateScoreboard(event.getPlayer());
+        Player player = event.getPlayer();
+
+        if (fullBrightEnabled.contains(player.getUniqueId())) {
+            player.addPotionEffect(new PotionEffect(PotionEffectType.NIGHT_VISION, Integer.MAX_VALUE, 0, false, false, false));
+        }
     }
 
     @EventHandler
