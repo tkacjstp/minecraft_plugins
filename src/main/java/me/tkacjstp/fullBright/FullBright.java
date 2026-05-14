@@ -7,6 +7,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -15,12 +16,14 @@ import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scoreboard.*;
 import org.bukkit.scheduler.BukkitRunnable;
 
+
 import java.util.HashSet;
 import java.util.UUID;
 
 public final class FullBright extends JavaPlugin implements  Listener {
 
     private final  HashSet<UUID> fullBrightEnabled = new HashSet<>();
+    private final java.util.Map<UUID, Location> deathLocations = new java.util.HashMap<>();
 
     @Override
     public void onEnable() {
@@ -77,8 +80,20 @@ public final class FullBright extends JavaPlugin implements  Listener {
         fullBrightEnabled.remove(event.getPlayer().getUniqueId());
     }
 
+
+    @EventHandler
+    public void onDeath(PlayerDeathEvent event) {
+        Bukkit.getLogger().info("내 플러그인: 유저 사망 감지됨!");
+        Player player = event.getEntity();
+        deathLocations.put(player.getUniqueId(), player.getLocation());
+    }
+
+
+
     private void updateScoreboard(Player player) {
         ScoreboardManager manager = Bukkit.getScoreboardManager();
+        if (manager == null) return;
+
         Scoreboard board = manager.getNewScoreboard();
 
         Objective objective = board.registerNewObjective("stats", "dummy", "§a[ 정보 ]");
@@ -89,13 +104,52 @@ public final class FullBright extends JavaPlugin implements  Listener {
         String x = String.format("%.2f", loc.getX());
         String y = String.format("%.2f", loc.getY());
         String z = String.format("%.2f", loc.getZ());
-        String biome = loc.getBlock().getBiome().toString();
+        String biome = formatBiomeName(loc.getBlock().getBiome().toString());
 
-        objective.getScore("§fX: §e" + x).setScore(4);
-        objective.getScore("§fY: §e" + y).setScore(3);
-        objective.getScore("§fZ: §e" + z).setScore(2);
-        objective.getScore("§7---").setScore(1);
-        objective.getScore("§fBiome: §b" + biome).setScore(0);
+        objective.getScore("§fX: §e" + x).setScore(11);
+        objective.getScore("§fY: §e" + y).setScore(10);
+        objective.getScore("§fZ: §e" + z).setScore(9);
+        objective.getScore("§fBiome: §b" + biome).setScore(8);
+        objective.getScore("§1 ").setScore(7);
+
+        Location dLoc = deathLocations.get(player.getUniqueId());
+        if (dLoc != null) {
+            String currentWorld = player.getWorld().getName();
+            String deathWorld = dLoc.getWorld().getName();
+
+            String translatedWorld;
+            if (deathWorld.contains("nether")) translatedWorld = "§c[ 네더 ]";
+            else if (deathWorld.contains("the_end")) translatedWorld = "§d[ 엔더 ]";
+            else translatedWorld = "§a[ 오버월드 ]";
+
+            if (currentWorld.equals(deathWorld)) {
+                int distance = (int) player.getLocation().distance(dLoc);
+
+                if (distance < 2 && !player.isDead()) {
+                    deathLocations.remove(player.getUniqueId());
+                    player.setScoreboard(board);
+                    return;
+                } else {
+                    objective.getScore("§f거리: §b" + distance + "m").setScore(3);
+
+                    objective.getScore("§7--------------------").setScore(6);
+                    objective.getScore("§e§l사망 위치 정보").setScore(5);
+                    objective.getScore(translatedWorld).setScore(4);
+                    objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
+                    objective.getScore("§7-------------------- ").setScore(1);
+
+                }
+            } else {
+                objective.getScore("§7(다른 월드에 있음)").setScore(3);
+
+                objective.getScore("§7--------------------").setScore(6);
+                objective.getScore("§e§l사망 위치 정보").setScore(5);
+                objective.getScore(translatedWorld).setScore(4);
+                objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
+                objective.getScore("§7-------------------- ").setScore(1);
+
+            }
+        }
 
         player.setScoreboard(board);
     }
