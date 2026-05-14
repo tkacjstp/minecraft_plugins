@@ -2,6 +2,7 @@ package me.tkacjstp.fullBright;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Particle;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -129,7 +130,12 @@ public final class FullBright extends JavaPlugin implements  Listener {
                     deathLocations.remove(player.getUniqueId());
                     player.setScoreboard(board);
                     return;
-                } else {
+                }
+
+                double dY = dLoc.getBlockY();
+                for (int i = (int) (-64 - dY); i < (int) (220 - dY); i += 1) {
+                    player.spawnParticle(Particle.END_ROD, dLoc.clone().add(0, i, 0), 5, 0.1, 0.1, 0.1, 0);
+                }
                     objective.getScore("§f거리: §b" + distance + "m").setScore(3);
 
                     objective.getScore("§7--------------------").setScore(6);
@@ -138,7 +144,6 @@ public final class FullBright extends JavaPlugin implements  Listener {
                     objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
                     objective.getScore("§7-------------------- ").setScore(1);
 
-                }
             } else {
                 objective.getScore("§7(다른 월드에 있음)").setScore(3);
 
