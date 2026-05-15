@@ -83,7 +83,10 @@ public final class FullBright extends JavaPlugin implements  Listener {
         List<Location> locs = deathLocations.get(player.getUniqueId());
 
         if (locs != null && !locs.isEmpty()){
-            if (index >= locs.size()) index = 0;
+            if (index >= locs.size()) {
+                index = locs.size() - 1;
+                trackingIndex.put(player.getUniqueId(), index);
+            }
             Location dLoc = locs.get(index);
 
             if (dLoc != null) {
