@@ -4,3 +4,4 @@ main: me.tkacjstp.fullBright.FullBright  # 이 부분이 실제 내 코드 패�
 api-version: '26.1.2'
 commands:
   light:
+  cf:

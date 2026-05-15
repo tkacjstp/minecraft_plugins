@@ -2,32 +2,47 @@ package me.tkacjstp.fullBright;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scoreboard.*;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.yaml.snakeyaml.Yaml;
 
 
-import java.util.HashSet;
-import java.util.UUID;
+import java.io.File;
+import java.io.IOException;
+import java.util.*;
 
 public final class FullBright extends JavaPlugin implements  Listener {
 
     private final  HashSet<UUID> fullBrightEnabled = new HashSet<>();
-    private final java.util.Map<UUID, Location> deathLocations = new java.util.HashMap<>();
+    private final Map<UUID, List<Location>> deathLocations = new HashMap<>();
+    private final Map<UUID, List<List<ItemStack>>> deathItems = new HashMap<>();
+    private final Map<UUID, Integer> trackingIndex = new HashMap<>();
+    private File dataFile;
+    private YamlConfiguration dataConfig;
 
     @Override
     public void onEnable() {
+        saveDefaultConfig();
+        createDataFile();
+        loadDeathData();
         getServer().getPluginManager().registerEvents(this, this);
         getCommand("light").setExecutor(this);
 
@@ -41,11 +56,136 @@ public final class FullBright extends JavaPlugin implements  Listener {
         }.runTaskTimer(this, 0L, 2L); // 2틱(0.1초)마다 실행
     }
 
+    private void createDataFile() {
+        dataFile = new File(getDataFolder(), "deathData.yml");
+        if (!dataFile.exists()) {
+            try {
+                dataFile.createNewFile();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        dataConfig = YamlConfiguration.loadConfiguration(dataFile);
+    }
+
+    private void saveDeathData() {
+        dataConfig.set("data", null);
+        for (UUID uuid : deathLocations.keySet()) {
+            dataConfig.set("data." + uuid.toString() + ".location", deathLocations.get(uuid));
+            dataConfig.set("data." + uuid.toString() + ".items", deathItems.get(uuid));
+        }
+        try {
+            dataConfig.save(dataFile);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void loadDeathData() {
+        if (dataConfig.getConfigurationSection("data") == null)
+            return;
+        for (String uuidStr : dataConfig.getConfigurationSection("data").getKeys(false)) {
+            UUID uuid = UUID.fromString(uuidStr);
+            List<Location> locations = (List<Location>) dataConfig.getList("data." + uuidStr + ".location");
+            List<List<ItemStack>> items = (List<List<ItemStack>>) dataConfig.getList("data." + uuidStr + ".items");
+            deathLocations.put(uuid, locations);
+            deathItems.put(uuid, items);
+        }
+    }
+
+    @EventHandler
+    public void onPlayerDeath(PlayerDeathEvent event) {
+        Player player = event.getEntity();
+
+        if (event.getDrops().isEmpty())
+            return;
+
+        Location loc = player.getLocation().getBlock().getLocation();
+        loc.getBlock().setType(Material.CHEST);
+
+        List<ItemStack> drops = new ArrayList<>(event.getDrops());
+        event.getDrops().clear();
+
+        UUID uuid = player.getUniqueId();
+        deathLocations.computeIfAbsent(uuid, k -> new ArrayList<>()).add(loc);
+        deathItems.computeIfAbsent(uuid, k -> new ArrayList<>()).add(drops);
+
+        saveDeathData();
+    }
+
+    @EventHandler
+    public void onCheatOpen (PlayerInteractEvent event) {
+        if (event.getClickedBlock() == null || event.getClickedBlock().getType() != Material.CHEST);
+
+        for (List<Location> locs : deathLocations.values()){
+            if (locs.contains(event.getClickedBlock().getLocation())) {
+                event.setCancelled(true);
+                return;
+            }
+        }
+    }
+
+    @EventHandler
+    public void onBlockBreak (BlockBreakEvent event) {
+        if (event.getBlock().getType() != Material.CHEST);
+        Location breakLoc = event.getBlock().getLocation();
+
+        for (UUID uuid : deathLocations.keySet()) {
+            List<Location> locs = deathLocations.get(uuid);
+            if (locs.contains(breakLoc)) {
+                int index = locs.indexOf(breakLoc);
+
+                List<ItemStack> saved = deathItems.get(uuid).get(index);
+                for (ItemStack item : saved) {
+                    event.getBlock().getWorld().dropItemNaturally(breakLoc, item);
+                }
+
+                locs.remove(index);
+                deathItems.get(uuid).remove(index);
+                event.setDropItems(false);
+
+                if (locs.isEmpty()) {
+                    deathLocations.remove(uuid);
+                    deathItems.remove(uuid);
+                }
+
+                saveDeathData();
+                return;
+            }
+        }
+    }
+
+    private void updateSystems() {
+        for (Player player : getServer().getOnlinePlayers()) {
+            UUID uuid = player.getUniqueId();
+            List<Location> locs = deathLocations.get(uuid);
+            int targetIdx = trackingIndex.getOrDefault(uuid , 0);
+
+            if (locs != null && !locs.isEmpty()) {
+                if (targetIdx >= locs.size()) targetIdx = 0;
+                Location target = locs.get(targetIdx);
+            }
+        }
+    }
+
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (sender instanceof Player) {
             Player player = (Player) sender;
             UUID uuid = player.getUniqueId();
+
+            if (command.getName().equalsIgnoreCase("cf") && args.length > 0) {
+                try {
+                    int idx = Integer.parseInt(args[0]) - 1;
+                    trackingIndex.put(player.getUniqueId(), idx);
+                    player.sendMessage("§a[!] 추적 대상이 \" + (idx + 1) + \"번 상자로 변경되었습니다.");
+                } catch (NumberFormatException e) {
+                    player.sendMessage("§c숫자를 입력하세요.");
+                }
+                return true;
+            }
+
 
             if (fullBrightEnabled.contains(uuid)) {
                 fullBrightEnabled.remove(uuid);
@@ -81,16 +221,6 @@ public final class FullBright extends JavaPlugin implements  Listener {
         fullBrightEnabled.remove(event.getPlayer().getUniqueId());
     }
 
-
-    @EventHandler
-    public void onDeath(PlayerDeathEvent event) {
-        Bukkit.getLogger().info("내 플러그인: 유저 사망 감지됨!");
-        Player player = event.getEntity();
-        deathLocations.put(player.getUniqueId(), player.getLocation());
-    }
-
-
-
     private void updateScoreboard(Player player) {
         ScoreboardManager manager = Bukkit.getScoreboardManager();
         if (manager == null) return;
@@ -113,7 +243,14 @@ public final class FullBright extends JavaPlugin implements  Listener {
         objective.getScore("§fBiome: §b" + biome).setScore(8);
         objective.getScore("§1 ").setScore(7);
 
-        Location dLoc = deathLocations.get(player.getUniqueId());
+        int index = trackingIndex.getOrDefault(player.getUniqueId(), 0);
+        List<Location> locs = deathLocations.get(player.getUniqueId());
+
+        Location dLoc = null;
+        if (locs != null && !locs.isEmpty()){
+            if (index >= locs.size()) index = 0;
+            dLoc = locs.get(index);
+        }
         if (dLoc != null) {
             String currentWorld = player.getWorld().getName();
             String deathWorld = dLoc.getWorld().getName();
