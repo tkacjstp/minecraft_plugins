@@ -7,7 +7,6 @@ import org.bukkit.Particle;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -22,7 +21,6 @@ import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scoreboard.*;
 import org.bukkit.scheduler.BukkitRunnable;
-import org.yaml.snakeyaml.Yaml;
 
 
 import java.io.File;
@@ -43,8 +41,11 @@ public final class FullBright extends JavaPlugin implements  Listener {
         saveDefaultConfig();
         createDataFile();
         loadDeathData();
+
         getServer().getPluginManager().registerEvents(this, this);
+
         getCommand("light").setExecutor(this);
+        getCommand("cf").setExecutor(this);
 
         new BukkitRunnable() {
             @Override
@@ -54,6 +55,82 @@ public final class FullBright extends JavaPlugin implements  Listener {
                 }
             }
         }.runTaskTimer(this, 0L, 2L); // 2틱(0.1초)마다 실행
+    }
+
+    private void updateScoreboard(Player player) {
+        ScoreboardManager manager = Bukkit.getScoreboardManager();
+        if (manager == null) return;
+
+        Scoreboard board = manager.getNewScoreboard();
+
+        Objective objective = board.registerNewObjective("stats", "dummy", "§a[ 정보 ]");
+        objective.setDisplaySlot(DisplaySlot.SIDEBAR);
+
+        Location loc = player.getLocation();
+
+        String x = String.format("%.2f", loc.getX());
+        String y = String.format("%.2f", loc.getY());
+        String z = String.format("%.2f", loc.getZ());
+        String biome = formatBiomeName(loc.getBlock().getBiome().toString());
+
+        objective.getScore("§fX: §e" + x).setScore(11);
+        objective.getScore("§fY: §e" + y).setScore(10);
+        objective.getScore("§fZ: §e" + z).setScore(9);
+        objective.getScore("§fBiome: §b" + biome).setScore(8);
+        objective.getScore("§1 ").setScore(7);
+
+        int index = trackingIndex.getOrDefault(player.getUniqueId(), 0);
+        List<Location> locs = deathLocations.get(player.getUniqueId());
+
+        if (locs != null && !locs.isEmpty()){
+            if (index >= locs.size()) index = 0;
+            Location dLoc = locs.get(index);
+
+            if (dLoc != null) {
+                String currentWorld = player.getWorld().getName();
+                String deathWorld = dLoc.getWorld().getName();
+
+                String translatedWorld;
+                if (deathWorld.contains("nether")) translatedWorld = "§c[ 네더 ]";
+                else if (deathWorld.contains("the_end")) translatedWorld = "§d[ 엔더 ]";
+                else translatedWorld = "§a[ 오버월드 ]";
+
+                if (currentWorld.equals(deathWorld)) {
+                    int distance = (int) player.getLocation().distance(dLoc);
+
+                    if (distance < 2 && !player.isDead()) {
+                        deathLocations.remove(player.getUniqueId());
+                        player.setScoreboard(board);
+                        return;
+                    }
+
+                    double dY = dLoc.getBlockY();
+                    for (int i = (int) (-64 - dY); i < (int) (220 - dY); i += 1) {
+                        player.spawnParticle(Particle.END_ROD, dLoc.clone().add(0, i, 0), 5, 0.1, 0.1, 0.1, 0);
+                    }
+                    objective.getScore("§f거리: §b" + distance + "m").setScore(3);
+
+                    objective.getScore("§7--------------------").setScore(6);
+                    objective.getScore("§e§l사망 위치 정보").setScore(5);
+                    objective.getScore(translatedWorld).setScore(4);
+                    objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
+                    objective.getScore("§f상자 번호: §e").setScore(1);
+                    objective.getScore("§7-------------------- ").setScore(0);
+
+                } else {
+                    objective.getScore("§7(다른 월드에 있음)").setScore(3);
+
+                    objective.getScore("§7--------------------").setScore(6);
+                    objective.getScore("§e§l사망 위치 정보").setScore(5);
+                    objective.getScore(translatedWorld).setScore(4);
+                    objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
+                    objective.getScore("§f상자 번호: §e").setScore(1);
+                    objective.getScore("§7-------------------- ").setScore(0);
+
+                }
+            }
+        }
+        player.setScoreboard(board);
     }
 
     private void createDataFile() {
@@ -132,17 +209,22 @@ public final class FullBright extends JavaPlugin implements  Listener {
 
         for (UUID uuid : deathLocations.keySet()) {
             List<Location> locs = deathLocations.get(uuid);
-            if (locs.contains(breakLoc)) {
-                int index = locs.indexOf(breakLoc);
+            if (locs != null) continue;
 
-                List<ItemStack> saved = deathItems.get(uuid).get(index);
-                for (ItemStack item : saved) {
-                    event.getBlock().getWorld().dropItemNaturally(breakLoc, item);
+            for (int i = 0; i < locs.size(); i++) {
+                if (locs.get(i).equals(breakLoc)) {
+                    List<List<ItemStack>> allItems = deathItems.get(uuid);
+                    if (allItems != null && allItems.size() > 1) {
+                        List<ItemStack> savedItems = allItems.get(i);
+                        for (ItemStack item : savedItems) {
+                            if (item != null) {
+                                breakLoc.getWorld().dropItemNaturally(breakLoc, item);
+                            }
+                        }
+                    }
+                    allItems.remove(i);
+                    locs.remove(i);
                 }
-
-                locs.remove(index);
-                deathItems.get(uuid).remove(index);
-                event.setDropItems(false);
 
                 if (locs.isEmpty()) {
                     deathLocations.remove(uuid);
@@ -175,36 +257,37 @@ public final class FullBright extends JavaPlugin implements  Listener {
             Player player = (Player) sender;
             UUID uuid = player.getUniqueId();
 
-            if (command.getName().equalsIgnoreCase("cf") && args.length > 0) {
-                try {
-                    int idx = Integer.parseInt(args[0]) - 1;
-                    trackingIndex.put(player.getUniqueId(), idx);
-                    player.sendMessage("§a[!] 추적 대상이 \" + (idx + 1) + \"번 상자로 변경되었습니다.");
-                } catch (NumberFormatException e) {
-                    player.sendMessage("§c숫자를 입력하세요.");
+            if (command.getName().equalsIgnoreCase("cf")) {
+                if (args.length > 0) {
+                    try {
+                        int idx = Integer.parseInt(args[0]) - 1;
+                        trackingIndex.put(player.getUniqueId(), idx);
+                        player.sendMessage("§a[!] 추적 대상이 \" + (idx + 1) + \"번 상자로 변경되었습니다.");
+                    } catch (NumberFormatException e) {
+                        player.sendMessage("§c숫자를 입력하세요.");
+                    }
                 }
                 return true;
             }
 
-
-            if (fullBrightEnabled.contains(uuid)) {
-                fullBrightEnabled.remove(uuid);
-                player.removePotionEffect(PotionEffectType.NIGHT_VISION);
-            } else {
-                fullBrightEnabled.add(uuid);
-                player.addPotionEffect(new PotionEffect(
-                        PotionEffectType.NIGHT_VISION,
-                        Integer.MAX_VALUE,
-                        255,
-                        false,
-                        false,
-                        false));
+            if (command.getName().equalsIgnoreCase("light")) {
+                if (fullBrightEnabled.contains(uuid)) {
+                    fullBrightEnabled.remove(uuid);
+                    player.removePotionEffect(PotionEffectType.NIGHT_VISION);
+                } else {
+                    fullBrightEnabled.add(uuid);
+                    player.addPotionEffect(new PotionEffect(
+                            PotionEffectType.NIGHT_VISION,
+                            Integer.MAX_VALUE,
+                            255,
+                            false,
+                            false,
+                            false));
+                }
+                return true;
             }
-
-            return true;
         }
-
-        return  false;
+        return false;
     }
 
     @EventHandler
@@ -219,81 +302,6 @@ public final class FullBright extends JavaPlugin implements  Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         fullBrightEnabled.remove(event.getPlayer().getUniqueId());
-    }
-
-    private void updateScoreboard(Player player) {
-        ScoreboardManager manager = Bukkit.getScoreboardManager();
-        if (manager == null) return;
-
-        Scoreboard board = manager.getNewScoreboard();
-
-        Objective objective = board.registerNewObjective("stats", "dummy", "§a[ 정보 ]");
-        objective.setDisplaySlot(DisplaySlot.SIDEBAR);
-
-        Location loc = player.getLocation();
-
-        String x = String.format("%.2f", loc.getX());
-        String y = String.format("%.2f", loc.getY());
-        String z = String.format("%.2f", loc.getZ());
-        String biome = formatBiomeName(loc.getBlock().getBiome().toString());
-
-        objective.getScore("§fX: §e" + x).setScore(11);
-        objective.getScore("§fY: §e" + y).setScore(10);
-        objective.getScore("§fZ: §e" + z).setScore(9);
-        objective.getScore("§fBiome: §b" + biome).setScore(8);
-        objective.getScore("§1 ").setScore(7);
-
-        int index = trackingIndex.getOrDefault(player.getUniqueId(), 0);
-        List<Location> locs = deathLocations.get(player.getUniqueId());
-
-        Location dLoc = null;
-        if (locs != null && !locs.isEmpty()){
-            if (index >= locs.size()) index = 0;
-            dLoc = locs.get(index);
-        }
-        if (dLoc != null) {
-            String currentWorld = player.getWorld().getName();
-            String deathWorld = dLoc.getWorld().getName();
-
-            String translatedWorld;
-            if (deathWorld.contains("nether")) translatedWorld = "§c[ 네더 ]";
-            else if (deathWorld.contains("the_end")) translatedWorld = "§d[ 엔더 ]";
-            else translatedWorld = "§a[ 오버월드 ]";
-
-            if (currentWorld.equals(deathWorld)) {
-                int distance = (int) player.getLocation().distance(dLoc);
-
-                if (distance < 2 && !player.isDead()) {
-                    deathLocations.remove(player.getUniqueId());
-                    player.setScoreboard(board);
-                    return;
-                }
-
-                double dY = dLoc.getBlockY();
-                for (int i = (int) (-64 - dY); i < (int) (220 - dY); i += 1) {
-                    player.spawnParticle(Particle.END_ROD, dLoc.clone().add(0, i, 0), 5, 0.1, 0.1, 0.1, 0);
-                }
-                    objective.getScore("§f거리: §b" + distance + "m").setScore(3);
-
-                    objective.getScore("§7--------------------").setScore(6);
-                    objective.getScore("§e§l사망 위치 정보").setScore(5);
-                    objective.getScore(translatedWorld).setScore(4);
-                    objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
-                    objective.getScore("§7-------------------- ").setScore(1);
-
-            } else {
-                objective.getScore("§7(다른 월드에 있음)").setScore(3);
-
-                objective.getScore("§7--------------------").setScore(6);
-                objective.getScore("§e§l사망 위치 정보").setScore(5);
-                objective.getScore(translatedWorld).setScore(4);
-                objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
-                objective.getScore("§7-------------------- ").setScore(1);
-
-            }
-        }
-
-        player.setScoreboard(board);
     }
 
     private String formatBiomeName(String name) {
