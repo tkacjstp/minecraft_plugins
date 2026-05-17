@@ -6,6 +6,8 @@ import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.Configuration;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -40,11 +42,11 @@ public final class FullBright extends JavaPlugin implements  Listener {
 
     @Override
     public void onEnable() {
-        //saveDefaultConfig();
-        //createDataFile();
-        //loadDeathData();
-
         getServer().getPluginManager().registerEvents(this, this);
+
+        saveDefaultConfig();
+        createDataFile();
+        loadDeathData();
 
         getCommand("light").setExecutor(this);
         getCommand("cf").setExecutor(this);
@@ -122,7 +124,7 @@ public final class FullBright extends JavaPlugin implements  Listener {
 
         event.getDrops().clear();
 
-        //saveDeathData();
+        saveDeathData();
     }
 
     @EventHandler
@@ -140,6 +142,7 @@ public final class FullBright extends JavaPlugin implements  Listener {
             }
         }
     }
+
     @EventHandler (priority = EventPriority.HIGHEST)
     public void onBlockBreak (BlockBreakEvent event) {
         if (event.getBlock().getType() != Material.CHEST)
@@ -171,7 +174,7 @@ public final class FullBright extends JavaPlugin implements  Listener {
                     event.getPlayer().sendMessage("§a[시스템] 회수 완료.");
                     return;
                 }
-                //saveDeathData();
+                saveDeathData();
             }
         }
     }
@@ -257,56 +260,105 @@ public final class FullBright extends JavaPlugin implements  Listener {
         player.setScoreboard(board);
     }
 
-    /*private void createDataFile() {
-        dataFile = new File(getDataFolder(), "deathData.yml");
-        if (!dataFile.exists()) {
-            try {
-                dataFile.createNewFile();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-        dataConfig = YamlConfiguration.loadConfiguration(dataFile);
-    }
-
-    private void saveDeathData() {
-        dataConfig.set("data", null);
-        for (UUID uuid : deathLocations.keySet()) {
-            dataConfig.set("data." + uuid.toString() + ".location", deathLocations.get(uuid));
-            dataConfig.set("data." + uuid.toString() + ".items", deathItems.get(uuid));
-        }
+    private void createDataFile() {
         try {
-            dataConfig.save(dataFile);
-        } catch (IOException e) {
+            if (!getDataFolder().exists()) {
+                getDataFolder().mkdirs();
+            }
+
+            dataFile = new File(getDataFolder(), "deathData.yml");
+            if (!dataFile.exists()) {
+                dataFile.createNewFile();
+                getLogger().info("dataFile created");
+            }
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private void loadDeathData() {
-        if (dataConfig.getConfigurationSection("data") == null)
+    private void saveDeathData() {
+        if (dataConfig == null || dataFile == null)
             return;
-        for (String uuidStr : dataConfig.getConfigurationSection("data").getKeys(false)) {
-            UUID uuid = UUID.fromString(uuidStr);
-            List<Location> locations = (List<Location>) dataConfig.getList("data." + uuidStr + ".location");
-            List<List<ItemStack>> items = (List<List<ItemStack>>) dataConfig.getList("data." + uuidStr + ".items");
-            deathLocations.put(uuid, locations);
-            deathItems.put(uuid, items);
+
+        try {
+            dataConfig.set("data", null);
+
+            for (UUID uuid : deathLocations.keySet()) {
+                List<Location> locs = deathLocations.get(uuid);
+                List<List<ItemStack>> allItems = deathItems.get(uuid);
+
+                if (locs == null || locs.isEmpty())
+                    continue;
+
+                String uuidStr = uuid.toString();
+
+                for (int i = 0; i < locs.size(); i++) {
+                    Location loc = locs.get(i);
+                    List<ItemStack> items = (allItems != null && i < allItems.size()) ? allItems.get(i) : new ArrayList<>();
+
+                    String path = "data" + uuidStr + "." + i;
+
+                    dataConfig.set(path + ".location", loc);
+                    dataConfig.set(path + ".items", items);
+
+                }
+            }
+            dataConfig.save(dataFile);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
-    private void updateSystems() {
-        for (Player player : getServer().getOnlinePlayers()) {
-            UUID uuid = player.getUniqueId();
-            List<Location> locs = deathLocations.get(uuid);
-            int targetIdx = trackingIndex.getOrDefault(uuid , 0);
+    @SuppressWarnings("unchecked")
+    private void loadDeathData() {
+        if (dataConfig == null || !dataFile.exists())
+            return;
+        try {
+            dataConfig = YamlConfiguration.loadConfiguration(dataFile);
+            if (!dataConfig.contains("data"))
+                return;
 
-            if (locs != null && !locs.isEmpty()) {
-                if (targetIdx >= locs.size()) targetIdx = 0;
-                Location target = locs.get(targetIdx);
+            deathLocations.clear();
+            deathItems.clear();
+
+            ConfigurationSection dataSection = dataConfig.getConfigurationSection("data");
+            if (dataSection == null)
+                return;
+
+            for (String uuidStr : dataSection.getKeys(false)) {
+                UUID uuid = UUID.fromString(uuidStr);
+                ConfigurationSection playerSection = dataSection.getConfigurationSection(uuidStr);
+
+                if (playerSection == null)
+                    continue;
+
+                List<Location> locs = new ArrayList<>();
+                List<List<ItemStack>> allItems = new ArrayList<>();
+
+                for (String indexStr : playerSection.getKeys(false)) {
+                    String path = uuidStr + "." + indexStr;
+
+                    Location loc = (Location) dataConfig.get("data" + path + ".location");
+                    List<ItemStack> items = (List<ItemStack>) dataConfig.getList("data" + path + ".items");
+
+                    if (loc != null) {
+                        locs.add(loc);
+                        allItems.add(items != null ? items : new ArrayList<>());
+                    }
+                }
+
+                if (!locs.isEmpty()) {
+                    deathLocations.put(uuid, locs);
+                    deathItems.put(uuid, allItems);
+                }
             }
+            getLogger().info("deathData.yml로부터 사망 상자 데이터를 성공적으로 복구했습니다.");
+        } catch (Exception e) {
+            getLogger().severe("deathData.yml 데이터를 읽어오는 도중 문법 오류가 발견되었습니다!");
+            e.printStackTrace();
         }
-    }*/
 
+    }
 
 
     @EventHandler
