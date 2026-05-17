@@ -149,7 +149,7 @@ public final class FullBright extends JavaPlugin implements  Listener {
 
         for (UUID uuid : deathLocations.keySet()) {
             List<Location> locs = deathLocations.get(uuid);
-            if (locs != null) continue;
+            if (locs == null) continue;
 
             for (int i = 0; i < locs.size(); i++) {
                 if (locs.get(i).equals(breakLoc)) {
@@ -219,11 +219,11 @@ public final class FullBright extends JavaPlugin implements  Listener {
                     if (currentWorld.equals(deathWorld)) {
                         int distance = (int) player.getLocation().distance(dLoc);
 
-                        if (distance < 2 && !player.isDead()) {
+                        /*if (distance < 2 && !player.isDead()) {
                             deathLocations.remove(player.getUniqueId());
                             player.setScoreboard(board);
                             return;
-                        }
+                        }*/
 
                         double dY = dLoc.getBlockY();
                         for (int i = (int) (-64 - dY); i < (int) (220 - dY); i += 1) {
