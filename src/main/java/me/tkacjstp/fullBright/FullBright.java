@@ -33,7 +33,7 @@ import java.util.*;
 
 public final class FullBright extends JavaPlugin implements  Listener {
 
-    private final  HashSet<UUID> fullBrightEnabled = new HashSet<>();
+    private final HashSet<UUID> fullBrightEnabled = new HashSet<>();
     private final Map<UUID, List<Location>> deathLocations = new HashMap<>();
     private final Map<UUID, List<List<ItemStack>>> deathItems = new HashMap<>();
     private final Map<UUID, Integer> trackingIndex = new HashMap<>();
@@ -43,10 +43,6 @@ public final class FullBright extends JavaPlugin implements  Listener {
     @Override
     public void onEnable() {
         getServer().getPluginManager().registerEvents(this, this);
-
-        saveDefaultConfig();
-        createDataFile();
-        loadDeathData();
 
         getCommand("light").setExecutor(this);
         getCommand("cf").setExecutor(this);
@@ -59,6 +55,24 @@ public final class FullBright extends JavaPlugin implements  Listener {
                 }
             }
         }.runTaskTimer(this, 0L, 2L); // 2틱(0.1초)마다 실행
+
+        saveDefaultConfig();
+        createDataFile();
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                loadDeathData();
+            }
+
+        }.runTaskLater(this, 20L);
+
+
+    }
+
+    @Override
+    public void onDisable() {
+        saveDeathData();
+        getLogger().info("deathdata saved");
     }
 
     @Override
@@ -238,7 +252,7 @@ public final class FullBright extends JavaPlugin implements  Listener {
                         objective.getScore("§e§l사망 위치 정보").setScore(5);
                         objective.getScore(translatedWorld).setScore(4);
                         objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
-                        objective.getScore("§f상자 번호: §e").setScore(1);
+                        objective.getScore("§f상자 번호: §e" + (index + 1) + "번").setScore(1);
                         objective.getScore("§7-------------------- ").setScore(0);
 
                     } else {
@@ -248,7 +262,7 @@ public final class FullBright extends JavaPlugin implements  Listener {
                         objective.getScore("§e§l사망 위치 정보").setScore(5);
                         objective.getScore(translatedWorld).setScore(4);
                         objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
-                        objective.getScore("§f상자 번호: §e").setScore(1);
+                        objective.getScore("§f상자 번호: §e" + (index + 1) + "번").setScore(1);
                         objective.getScore("§7-------------------- ").setScore(0);
 
                     }
@@ -294,10 +308,14 @@ public final class FullBright extends JavaPlugin implements  Listener {
 
                 for (int i = 0; i < locs.size(); i++) {
                     Location loc = locs.get(i);
+                    if (loc == null || loc.getWorld() == null)
+                        continue;
+
                     List<ItemStack> items = (allItems != null && i < allItems.size()) ? allItems.get(i) : new ArrayList<>();
 
                     String path = "data" + uuidStr + "." + i;
 
+                    String locStr = loc.getWorld().getName() + "," + loc.getX() + "," + loc.getY() + "," + loc.getZ();
                     dataConfig.set(path + ".location", loc);
                     dataConfig.set(path + ".items", items);
 
@@ -305,6 +323,7 @@ public final class FullBright extends JavaPlugin implements  Listener {
             }
             dataConfig.save(dataFile);
         } catch (Exception e) {
+            getLogger().severe("사망 데이터를 deathData.yml에 저장하는 도중 오류가 발생했습니다!");
             e.printStackTrace();
         }
     }
@@ -318,17 +337,22 @@ public final class FullBright extends JavaPlugin implements  Listener {
             if (!dataConfig.contains("data"))
                 return;
 
-            deathLocations.clear();
-            deathItems.clear();
-
             ConfigurationSection dataSection = dataConfig.getConfigurationSection("data");
             if (dataSection == null)
                 return;
 
-            for (String uuidStr : dataSection.getKeys(false)) {
-                UUID uuid = UUID.fromString(uuidStr);
-                ConfigurationSection playerSection = dataSection.getConfigurationSection(uuidStr);
+            Map<UUID, List<Location>> tempLocations = new HashMap<>();
+            Map<UUID, List<List<ItemStack>>> tempItems = new HashMap<>();
 
+            for (String uuidStr : dataSection.getKeys(false)) {
+                UUID uuid;
+                try {
+                    uuid = UUID.fromString(uuidStr);
+                } catch (IllegalArgumentException e) {
+                    continue;
+                }
+
+                ConfigurationSection playerSection = dataSection.getConfigurationSection(uuidStr);
                 if (playerSection == null)
                     continue;
 
@@ -336,14 +360,25 @@ public final class FullBright extends JavaPlugin implements  Listener {
                 List<List<ItemStack>> allItems = new ArrayList<>();
 
                 for (String indexStr : playerSection.getKeys(false)) {
-                    String path = uuidStr + "." + indexStr;
+                    String path = "data." + uuidStr + "." + indexStr;
 
-                    Location loc = (Location) dataConfig.get("data" + path + ".location");
-                    List<ItemStack> items = (List<ItemStack>) dataConfig.getList("data" + path + ".items");
+                    String locStr = (String) dataConfig.get(path + ".location");
+                    List<ItemStack> items = (List<ItemStack>) dataConfig.getList(path + ".items");
 
-                    if (loc != null) {
-                        locs.add(loc);
-                        allItems.add(items != null ? items : new ArrayList<>());
+                    if (locStr != null) {
+                        String[] split = locStr.split(",");
+                        if (split.length == 4) {
+                            org.bukkit.World world = Bukkit.getWorld(split[0]);
+                            if (world != null) {
+                                int x = Integer.parseInt(split[1]);
+                                int y = Integer.parseInt(split[2]);
+                                int z = Integer.parseInt(split[3]);
+                                Location loc = new Location(world, x, y, z);
+
+                                locs.add(loc);
+                                allItems.add(items != null ? items : new ArrayList<>());
+                            }
+                        }
                     }
                 }
 
@@ -352,6 +387,12 @@ public final class FullBright extends JavaPlugin implements  Listener {
                     deathItems.put(uuid, allItems);
                 }
             }
+
+            deathLocations.clear();
+            deathItems.clear();
+            deathLocations.putAll(tempLocations);
+            deathItems.putAll(tempItems);
+
             getLogger().info("deathData.yml로부터 사망 상자 데이터를 성공적으로 복구했습니다.");
         } catch (Exception e) {
             getLogger().severe("deathData.yml 데이터를 읽어오는 도중 문법 오류가 발견되었습니다!");
