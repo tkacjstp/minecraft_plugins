@@ -9,6 +9,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -24,8 +25,9 @@ import org.bukkit.scheduler.BukkitRunnable;
 
 
 import java.io.File;
-import java.io.IOException;
 import java.util.*;
+
+
 
 public final class FullBright extends JavaPlugin implements  Listener {
 
@@ -38,9 +40,9 @@ public final class FullBright extends JavaPlugin implements  Listener {
 
     @Override
     public void onEnable() {
-        saveDefaultConfig();
-        createDataFile();
-        loadDeathData();
+        //saveDefaultConfig();
+        //createDataFile();
+        //loadDeathData();
 
         getServer().getPluginManager().registerEvents(this, this);
 
@@ -55,6 +57,123 @@ public final class FullBright extends JavaPlugin implements  Listener {
                 }
             }
         }.runTaskTimer(this, 0L, 2L); // 2틱(0.1초)마다 실행
+    }
+
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (sender instanceof Player) {
+            Player player = (Player) sender;
+            UUID uuid = player.getUniqueId();
+
+            if (command.getName().equalsIgnoreCase("cf")) {
+                if (args.length > 0) {
+                    try {
+                        int idx = Integer.parseInt(args[0]) - 1;
+                        trackingIndex.put(uuid, idx);
+                        player.sendMessage("§a[!] 추적 대상이 " + (idx + 1) + "번 상자로 변경되었습니다.");
+                    } catch (NumberFormatException e) {
+                        player.sendMessage("§c숫자를 입력하세요.");
+                    }
+                }
+                return true;
+            }
+
+            if (command.getName().equalsIgnoreCase("light")) {
+                if (fullBrightEnabled.contains(uuid)) {
+                    fullBrightEnabled.remove(uuid);
+                    player.removePotionEffect(PotionEffectType.NIGHT_VISION);
+                } else {
+                    fullBrightEnabled.add(uuid);
+                    player.addPotionEffect(new PotionEffect(
+                            PotionEffectType.NIGHT_VISION,
+                            Integer.MAX_VALUE,
+                            255,
+                            false,
+                            false,
+                            false));
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @EventHandler
+    public void onDeath(PlayerDeathEvent event) {
+        Player player = event.getEntity();
+
+        if (event.getDrops().isEmpty())
+            return;
+
+        List<ItemStack> drops = new ArrayList<>();
+        for (ItemStack item : event.getDrops()) {
+            if (item != null && item.getType() != Material.AIR) {
+                drops.add(item.clone());
+            }
+        }
+
+
+        Location loc = player.getLocation().getBlock().getLocation();
+        loc.getBlock().setType(Material.CHEST);
+
+        UUID uuid = player.getUniqueId();
+        deathLocations.computeIfAbsent(uuid, k -> new ArrayList<>()).add(loc);
+        deathItems.computeIfAbsent(uuid, k -> new ArrayList<>()).add(drops);
+
+        event.getDrops().clear();
+
+        //saveDeathData();
+    }
+
+    @EventHandler
+    public void onCheatOpen (PlayerInteractEvent event) {
+        if (event.getAction().name().contains("RIGHT_CLICK_BLOCK")) {
+            if (event.getClickedBlock() != null && event.getClickedBlock().getType() == Material.CHEST) {
+                Location loc = event.getClickedBlock().getLocation();
+
+                for (List<Location> locList : deathLocations.values()) {
+                    if (locList.contains(loc)) {
+                        event.setCancelled(true);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    @EventHandler (priority = EventPriority.HIGHEST)
+    public void onBlockBreak (BlockBreakEvent event) {
+        if (event.getBlock().getType() != Material.CHEST)
+            return;
+
+        Location breakLoc = event.getBlock().getLocation();
+
+        for (UUID uuid : deathLocations.keySet()) {
+            List<Location> locs = deathLocations.get(uuid);
+            if (locs != null) continue;
+
+            for (int i = 0; i < locs.size(); i++) {
+                if (locs.get(i).equals(breakLoc)) {
+                    event.setCancelled(false);
+                    breakLoc.getBlock().setType(Material.AIR);
+
+                    List<List<ItemStack>> allItems = deathItems.get(uuid);
+                    if (allItems != null && allItems.size() > i) {
+                        List<ItemStack> items = allItems.get(i);
+                        if (items != null) {
+                            for (ItemStack item : items) {
+                                breakLoc.getWorld().dropItemNaturally(breakLoc, item);
+                            }
+                        }
+
+                        allItems.remove(i);
+                    }
+                    locs.remove(i);
+                    event.getPlayer().sendMessage("§a[시스템] 회수 완료.");
+                    return;
+                }
+                //saveDeathData();
+            }
+        }
     }
 
     private void updateScoreboard(Player player) {
@@ -79,64 +198,66 @@ public final class FullBright extends JavaPlugin implements  Listener {
         objective.getScore("§fBiome: §b" + biome).setScore(8);
         objective.getScore("§1 ").setScore(7);
 
-        int index = trackingIndex.getOrDefault(player.getUniqueId(), 0);
-        List<Location> locs = deathLocations.get(player.getUniqueId());
+        try {
+            List<Location> locs = deathLocations.get(player.getUniqueId());
+            if (locs != null && !locs.isEmpty()) {
+                int index = trackingIndex.getOrDefault(player.getUniqueId(), 0);
+                if (index >= locs.size()) index = locs.size() - 1;
+                if (index < 0) index = 0;
 
-        if (locs != null && !locs.isEmpty()){
-            if (index >= locs.size()) {
-                index = locs.size() - 1;
-                trackingIndex.put(player.getUniqueId(), index);
-            }
-            Location dLoc = locs.get(index);
+                Location dLoc = locs.get(index);
 
-            if (dLoc != null) {
-                String currentWorld = player.getWorld().getName();
-                String deathWorld = dLoc.getWorld().getName();
+                if (dLoc != null) {
+                    String currentWorld = player.getWorld().getName();
+                    String deathWorld = dLoc.getWorld().getName();
 
-                String translatedWorld;
-                if (deathWorld.contains("nether")) translatedWorld = "§c[ 네더 ]";
-                else if (deathWorld.contains("the_end")) translatedWorld = "§d[ 엔더 ]";
-                else translatedWorld = "§a[ 오버월드 ]";
+                    String translatedWorld;
+                    if (deathWorld.contains("nether")) translatedWorld = "§c[ 네더 ]";
+                    else if (deathWorld.contains("the_end")) translatedWorld = "§d[ 엔더 ]";
+                    else translatedWorld = "§a[ 오버월드 ]";
 
-                if (currentWorld.equals(deathWorld)) {
-                    int distance = (int) player.getLocation().distance(dLoc);
+                    if (currentWorld.equals(deathWorld)) {
+                        int distance = (int) player.getLocation().distance(dLoc);
 
-                    if (distance < 2 && !player.isDead()) {
-                        deathLocations.remove(player.getUniqueId());
-                        player.setScoreboard(board);
-                        return;
+                        if (distance < 2 && !player.isDead()) {
+                            deathLocations.remove(player.getUniqueId());
+                            player.setScoreboard(board);
+                            return;
+                        }
+
+                        double dY = dLoc.getBlockY();
+                        for (int i = (int) (-64 - dY); i < (int) (220 - dY); i += 1) {
+                            player.spawnParticle(Particle.END_ROD, dLoc.clone().add(0, i, 0), 5, 0.1, 0.1, 0.1, 0);
+                        }
+                        objective.getScore("§f거리: §b" + distance + "m").setScore(3);
+
+                        objective.getScore("§7--------------------").setScore(6);
+                        objective.getScore("§e§l사망 위치 정보").setScore(5);
+                        objective.getScore(translatedWorld).setScore(4);
+                        objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
+                        objective.getScore("§f상자 번호: §e").setScore(1);
+                        objective.getScore("§7-------------------- ").setScore(0);
+
+                    } else {
+                        objective.getScore("§7(다른 월드에 있음)").setScore(3);
+
+                        objective.getScore("§7--------------------").setScore(6);
+                        objective.getScore("§e§l사망 위치 정보").setScore(5);
+                        objective.getScore(translatedWorld).setScore(4);
+                        objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
+                        objective.getScore("§f상자 번호: §e").setScore(1);
+                        objective.getScore("§7-------------------- ").setScore(0);
+
                     }
-
-                    double dY = dLoc.getBlockY();
-                    for (int i = (int) (-64 - dY); i < (int) (220 - dY); i += 1) {
-                        player.spawnParticle(Particle.END_ROD, dLoc.clone().add(0, i, 0), 5, 0.1, 0.1, 0.1, 0);
-                    }
-                    objective.getScore("§f거리: §b" + distance + "m").setScore(3);
-
-                    objective.getScore("§7--------------------").setScore(6);
-                    objective.getScore("§e§l사망 위치 정보").setScore(5);
-                    objective.getScore(translatedWorld).setScore(4);
-                    objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
-                    objective.getScore("§f상자 번호: §e").setScore(1);
-                    objective.getScore("§7-------------------- ").setScore(0);
-
-                } else {
-                    objective.getScore("§7(다른 월드에 있음)").setScore(3);
-
-                    objective.getScore("§7--------------------").setScore(6);
-                    objective.getScore("§e§l사망 위치 정보").setScore(5);
-                    objective.getScore(translatedWorld).setScore(4);
-                    objective.getScore("§fX: §7" + dLoc.getBlockX() + " Y: §7" + dLoc.getBlockY() + " Z: §7" + dLoc.getBlockZ()).setScore(2);
-                    objective.getScore("§f상자 번호: §e").setScore(1);
-                    objective.getScore("§7-------------------- ").setScore(0);
-
                 }
             }
+        } catch (Exception e){
+            e.printStackTrace();
         }
         player.setScoreboard(board);
     }
 
-    private void createDataFile() {
+    /*private void createDataFile() {
         dataFile = new File(getDataFolder(), "deathData.yml");
         if (!dataFile.exists()) {
             try {
@@ -173,73 +294,6 @@ public final class FullBright extends JavaPlugin implements  Listener {
         }
     }
 
-    @EventHandler
-    public void onPlayerDeath(PlayerDeathEvent event) {
-        Player player = event.getEntity();
-
-        if (event.getDrops().isEmpty())
-            return;
-
-        Location loc = player.getLocation().getBlock().getLocation();
-        loc.getBlock().setType(Material.CHEST);
-
-        List<ItemStack> drops = new ArrayList<>(event.getDrops());
-        event.getDrops().clear();
-
-        UUID uuid = player.getUniqueId();
-        deathLocations.computeIfAbsent(uuid, k -> new ArrayList<>()).add(loc);
-        deathItems.computeIfAbsent(uuid, k -> new ArrayList<>()).add(drops);
-
-        saveDeathData();
-    }
-
-    @EventHandler
-    public void onCheatOpen (PlayerInteractEvent event) {
-        if (event.getClickedBlock() == null || event.getClickedBlock().getType() != Material.CHEST);
-
-        for (List<Location> locs : deathLocations.values()){
-            if (locs.contains(event.getClickedBlock().getLocation())) {
-                event.setCancelled(true);
-                return;
-            }
-        }
-    }
-
-    @EventHandler
-    public void onBlockBreak (BlockBreakEvent event) {
-        if (event.getBlock().getType() != Material.CHEST);
-        Location breakLoc = event.getBlock().getLocation();
-
-        for (UUID uuid : deathLocations.keySet()) {
-            List<Location> locs = deathLocations.get(uuid);
-            if (locs != null) continue;
-
-            for (int i = 0; i < locs.size(); i++) {
-                if (locs.get(i).equals(breakLoc)) {
-                    List<List<ItemStack>> allItems = deathItems.get(uuid);
-                    if (allItems != null && allItems.size() > 1) {
-                        List<ItemStack> savedItems = allItems.get(i);
-                        for (ItemStack item : savedItems) {
-                            if (item != null) {
-                                breakLoc.getWorld().dropItemNaturally(breakLoc, item);
-                            }
-                        }
-                    }
-                    allItems.remove(i);
-                    locs.remove(i);
-                }
-
-                if (locs.isEmpty()) {
-                    deathLocations.remove(uuid);
-                    deathItems.remove(uuid);
-                }
-
-                saveDeathData();
-                return;
-            }
-        }
-    }
-
     private void updateSystems() {
         for (Player player : getServer().getOnlinePlayers()) {
             UUID uuid = player.getUniqueId();
@@ -251,47 +305,9 @@ public final class FullBright extends JavaPlugin implements  Listener {
                 Location target = locs.get(targetIdx);
             }
         }
-    }
+    }*/
 
 
-    @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (sender instanceof Player) {
-            Player player = (Player) sender;
-            UUID uuid = player.getUniqueId();
-
-            if (command.getName().equalsIgnoreCase("cf")) {
-                if (args.length > 0) {
-                    try {
-                        int idx = Integer.parseInt(args[0]) - 1;
-                        trackingIndex.put(player.getUniqueId(), idx);
-                        player.sendMessage("§a[!] 추적 대상이 \" + (idx + 1) + \"번 상자로 변경되었습니다.");
-                    } catch (NumberFormatException e) {
-                        player.sendMessage("§c숫자를 입력하세요.");
-                    }
-                }
-                return true;
-            }
-
-            if (command.getName().equalsIgnoreCase("light")) {
-                if (fullBrightEnabled.contains(uuid)) {
-                    fullBrightEnabled.remove(uuid);
-                    player.removePotionEffect(PotionEffectType.NIGHT_VISION);
-                } else {
-                    fullBrightEnabled.add(uuid);
-                    player.addPotionEffect(new PotionEffect(
-                            PotionEffectType.NIGHT_VISION,
-                            Integer.MAX_VALUE,
-                            255,
-                            false,
-                            false,
-                            false));
-                }
-                return true;
-            }
-        }
-        return false;
-    }
 
     @EventHandler
     public  void onJoin(PlayerJoinEvent event) {
