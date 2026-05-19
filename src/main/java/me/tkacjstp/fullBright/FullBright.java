@@ -9,6 +9,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -42,11 +43,6 @@ public final class FullBright extends JavaPlugin implements  Listener {
 
     @Override
     public void onEnable() {
-        getServer().getPluginManager().registerEvents(this, this);
-
-        getCommand("light").setExecutor(this);
-        getCommand("cf").setExecutor(this);
-
         new BukkitRunnable() {
             @Override
             public void run() {
@@ -56,7 +52,12 @@ public final class FullBright extends JavaPlugin implements  Listener {
             }
         }.runTaskTimer(this, 0L, 2L); // 2틱(0.1초)마다 실행
 
-        saveDefaultConfig();
+        getServer().getPluginManager().registerEvents(this, this);
+
+        getCommand("light").setExecutor(this);
+        getCommand("cf").setExecutor(this);
+
+        //saveDefaultConfig();
         createDataFile();
         new BukkitRunnable() {
             @Override
@@ -278,13 +279,22 @@ public final class FullBright extends JavaPlugin implements  Listener {
         try {
             if (!getDataFolder().exists()) {
                 getDataFolder().mkdirs();
+                getLogger().info("FullBright 데이터 폴더를 새로 생성했습니다.");
             }
 
             dataFile = new File(getDataFolder(), "deathData.yml");
             if (!dataFile.exists()) {
-                dataFile.createNewFile();
-                getLogger().info("dataFile created");
+                boolean created = dataFile.createNewFile();
+                if (created) {
+                    getLogger().info("dataFile created");
+                } else {
+                    getLogger().severe("datafile created failed");
+                }
+
             }
+
+            dataConfig = YamlConfiguration.loadConfiguration(dataFile);
+
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -313,11 +323,11 @@ public final class FullBright extends JavaPlugin implements  Listener {
 
                     List<ItemStack> items = (allItems != null && i < allItems.size()) ? allItems.get(i) : new ArrayList<>();
 
-                    String path = "data" + uuidStr + "." + i;
+                    String path = uuidStr + "." + i;
 
                     String locStr = loc.getWorld().getName() + "," + loc.getX() + "," + loc.getY() + "," + loc.getZ();
-                    dataConfig.set(path + ".location", loc);
-                    dataConfig.set(path + ".items", items);
+                    dataConfig.set("data" + path + ".location", locStr);
+                    dataConfig.set("data" + path + ".items", items);
 
                 }
             }
@@ -330,7 +340,7 @@ public final class FullBright extends JavaPlugin implements  Listener {
 
     @SuppressWarnings("unchecked")
     private void loadDeathData() {
-        if (dataConfig == null || !dataFile.exists())
+        if (dataConfig == null || !dataFile.exists() || dataConfig == null)
             return;
         try {
             dataConfig = YamlConfiguration.loadConfiguration(dataFile);
@@ -360,10 +370,18 @@ public final class FullBright extends JavaPlugin implements  Listener {
                 List<List<ItemStack>> allItems = new ArrayList<>();
 
                 for (String indexStr : playerSection.getKeys(false)) {
-                    String path = "data." + uuidStr + "." + indexStr;
+                    String path = uuidStr + "." + indexStr;
 
-                    String locStr = (String) dataConfig.get(path + ".location");
-                    List<ItemStack> items = (List<ItemStack>) dataConfig.getList(path + ".items");
+                    String locStr = (String) dataConfig.get("data" + path + ".location");
+                    List<?> rawitems = dataConfig.getList("data" + path + ".items");
+                    List<ItemStack> items = new ArrayList<>();
+                    if (rawitems != null) {
+                        for (Object obj : rawitems) {
+                            if (obj instanceof ItemStack) {
+                                items.add((ItemStack) obj);
+                            }
+                        }
+                    }
 
                     if (locStr != null) {
                         String[] split = locStr.split(",");
@@ -376,7 +394,7 @@ public final class FullBright extends JavaPlugin implements  Listener {
                                 Location loc = new Location(world, x, y, z);
 
                                 locs.add(loc);
-                                allItems.add(items != null ? items : new ArrayList<>());
+                                allItems.add(items);
                             }
                         }
                     }
