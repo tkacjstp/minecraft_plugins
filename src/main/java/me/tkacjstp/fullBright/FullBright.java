@@ -59,9 +59,12 @@ public final class FullBright extends JavaPlugin implements  Listener {
 
         //saveDefaultConfig();
         createDataFile();
+        getLogger().info("=== [확인] 1초 뒤 사망 데이터를 불러오기 위해 대기 중... ===");
+
         new BukkitRunnable() {
             @Override
             public void run() {
+                getLogger().info("=== [확인] 1초가 지나 loadDeathData() 함수를 지금 실행합니다! ===");
                 loadDeathData();
             }
 
@@ -143,7 +146,7 @@ public final class FullBright extends JavaPlugin implements  Listener {
     }
 
     @EventHandler
-    public void onCheatOpen (PlayerInteractEvent event) {
+    public void onChestOpen (PlayerInteractEvent event) {
         if (event.getAction().name().contains("RIGHT_CLICK_BLOCK")) {
             if (event.getClickedBlock() != null && event.getClickedBlock().getType() == Material.CHEST) {
                 Location loc = event.getClickedBlock().getLocation();
@@ -305,16 +308,21 @@ public final class FullBright extends JavaPlugin implements  Listener {
             return;
 
         try {
-            dataConfig.set("data", null);
+            if (dataFile.exists()) {
+                dataConfig = YamlConfiguration.loadConfiguration(dataFile);
+            }
 
             for (UUID uuid : deathLocations.keySet()) {
                 List<Location> locs = deathLocations.get(uuid);
                 List<List<ItemStack>> allItems = deathItems.get(uuid);
 
-                if (locs == null || locs.isEmpty())
+                if (locs == null || locs.isEmpty()) {
+                    dataConfig.set("data." + uuid.toString(), null);
                     continue;
+                }
 
                 String uuidStr = uuid.toString();
+                dataConfig.set("data." + uuidStr, null);
 
                 for (int i = 0; i < locs.size(); i++) {
                     Location loc = locs.get(i);
@@ -326,8 +334,8 @@ public final class FullBright extends JavaPlugin implements  Listener {
                     String path = uuidStr + "." + i;
 
                     String locStr = loc.getWorld().getName() + "," + loc.getX() + "," + loc.getY() + "," + loc.getZ();
-                    dataConfig.set("data" + path + ".location", locStr);
-                    dataConfig.set("data" + path + ".items", items);
+                    dataConfig.set("data." + path + ".location", locStr);
+                    dataConfig.set("data." + path + ".items", items);
 
                 }
             }
@@ -340,12 +348,15 @@ public final class FullBright extends JavaPlugin implements  Listener {
 
     @SuppressWarnings("unchecked")
     private void loadDeathData() {
+        getLogger().info("=== [확인] loadDeathData 내부 진입 성공! ===");
         if (dataConfig == null || !dataFile.exists() || dataConfig == null)
             return;
         try {
             dataConfig = YamlConfiguration.loadConfiguration(dataFile);
-            if (!dataConfig.contains("data"))
+            if (!dataConfig.contains("data")) {
+                getLogger().info("deathData.yml 파일에 저장된 사망 데이터가 없습니다.");
                 return;
+            }
 
             ConfigurationSection dataSection = dataConfig.getConfigurationSection("data");
             if (dataSection == null)
@@ -370,27 +381,18 @@ public final class FullBright extends JavaPlugin implements  Listener {
                 List<List<ItemStack>> allItems = new ArrayList<>();
 
                 for (String indexStr : playerSection.getKeys(false)) {
-                    String path = uuidStr + "." + indexStr;
 
-                    String locStr = (String) dataConfig.get("data" + path + ".location");
-                    List<?> rawitems = dataConfig.getList("data" + path + ".items");
-                    List<ItemStack> items = new ArrayList<>();
-                    if (rawitems != null) {
-                        for (Object obj : rawitems) {
-                            if (obj instanceof ItemStack) {
-                                items.add((ItemStack) obj);
-                            }
-                        }
-                    }
+                    String locStr = playerSection.getString(indexStr + ".location");
+                    List<ItemStack> items = (List<ItemStack>) playerSection.getList(indexStr + ".items");
 
                     if (locStr != null) {
                         String[] split = locStr.split(",");
                         if (split.length == 4) {
                             org.bukkit.World world = Bukkit.getWorld(split[0]);
                             if (world != null) {
-                                int x = Integer.parseInt(split[1]);
-                                int y = Integer.parseInt(split[2]);
-                                int z = Integer.parseInt(split[3]);
+                                int x = (int) Double.parseDouble(split[1]);
+                                int y = (int) Double.parseDouble(split[2]);
+                                int z = (int) Double.parseDouble(split[3]);
                                 Location loc = new Location(world, x, y, z);
 
                                 locs.add(loc);
@@ -401,8 +403,8 @@ public final class FullBright extends JavaPlugin implements  Listener {
                 }
 
                 if (!locs.isEmpty()) {
-                    deathLocations.put(uuid, locs);
-                    deathItems.put(uuid, allItems);
+                    tempLocations.put(uuid, locs);
+                    tempItems.put(uuid, allItems);
                 }
             }
 
